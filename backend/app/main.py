@@ -141,14 +141,13 @@ def confirm_swap(swap_id: int, body: ConfirmBody = ConfirmBody()):
     sel = resolve_case(dict(sw), body.case)
     if not sel["ok"]:
         c.close(); raise HTTPException(400, sel["reason"])  # 未选案: 格表不变
-    # 详情/回包钉所选案，落格固定吃原案四元组
+    # 回包、详情所选案、落格三路同钉所选案四元组
     a_day, a_task, b_day, b_task = sel["tuple"]
-    oa, ot, ob, obt = sw["a_day"], sw["a_task"], sw["b_day"], sw["b_task"]
     assigns = [dict(r) for r in c.execute(
         "SELECT id,day,task_id,member_id FROM assignments WHERE week_id=?", (sw["week_id"],))]
     slots = [{"day": a["day"], "task_id": a["task_id"], "member_id": a["member_id"]} for a in assigns]
     try:
-        new_slots = apply_swap(slots, oa, ot, ob, obt)
+        new_slots = apply_swap(slots, a_day, a_task, b_day, b_task)
     except ValueError as e:
         c.close(); raise HTTPException(400, str(e))
     for a, s in zip(assigns, new_slots):
