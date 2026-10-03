@@ -141,16 +141,23 @@ def confirm_swap(swap_id: int, body: ConfirmBody = ConfirmBody()):
     sel = resolve_case(dict(sw), body.case)
     if not sel["ok"]:
         c.close(); raise HTTPException(400, sel["reason"])  # 未选案: 格表不变
-    # 详情/回包钉所选案，落格固定吃原案四元组
-    a_day, a_task, b_day, b_task = sel["tuple"]
-    oa, ot, ob, obt = sw["a_day"], sw["a_task"], sw["b_day"], sw["b_task"]
+    # 回包/详情/看板三路同钉所选案: 落格只吃所选案四元组及其票面成员
+    a_day, a_task, b_day, b_task, a_member, b_member = sel["tuple"]
     assigns = [dict(r) for r in c.execute(
         "SELECT id,day,task_id,member_id FROM assignments WHERE week_id=?", (sw["week_id"],))]
     slots = [{"day": a["day"], "task_id": a["task_id"], "member_id": a["member_id"]} for a in assigns]
+    # 落格前核对: 现格两格成员必须恰为所选案票面成员, 漂移或与另一案混用一律拒
+    live = {(s["day"], s["task_id"]): s["member_id"] for s in slots}
+    if live.get((a_day, a_task)) != a_member or live.get((b_day, b_task)) != b_member:
+        c.close(); raise HTTPException(400, "grid_changed")
     try:
-        new_slots = apply_swap(slots, oa, ot, ob, obt)
+        new_slots = apply_swap(slots, a_day, a_task, b_day, b_task)
     except ValueError as e:
         c.close(); raise HTTPException(400, str(e))
+    # 落格后对账: 库内两格必须恰好等于票面对方成员, 不得混入另一案
+    after = {(s["day"], s["task_id"]): s["member_id"] for s in new_slots}
+    if after[(a_day, a_task)] != b_member or after[(b_day, b_task)] != a_member:
+        c.close(); raise HTTPException(400, "case_mismatch")
     for a, s in zip(assigns, new_slots):
         c.execute("UPDATE assignments SET member_id=? WHERE id=?", (s["member_id"], a["id"]))
     c.execute("UPDATE swap_requests SET status='confirmed', selected_case=? WHERE id=?",
